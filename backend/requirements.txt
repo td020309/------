@@ -7,3 +7,4 @@ xlrd==2.0.1
 pydantic==2.5.3
 python-dotenv==1.0.0
 
+

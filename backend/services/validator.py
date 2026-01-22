@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Dict, List, Any, Optional
 import logging
 from datetime import datetime
+from .ai_validator import AIValidator
+from .report_generator import ReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +18,8 @@ class DataValidator:
         """
         검증 규칙을 초기화합니다.
         """
-        # TODO: 2차 검증용 AI 모델 설정 (추후 구현)
-        self.ai_model = None
+        self.ai_validator = AIValidator()
+        self.report_generator = ReportGenerator()
     
     def validate(self, mapped_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
         """
@@ -37,7 +39,8 @@ class DataValidator:
             "warnings": [],
             "sheet_results": {},
             "phase1_results": {},  # 1차 검증 결과
-            "phase2_results": {}   # 2차 검증 결과 (AI)
+            "phase2_results": {},  # 2차 검증 결과 (AI)
+            "summary_report": []   # 요약 리포트 (추가됨)
         }
         
         try:
@@ -45,7 +48,7 @@ class DataValidator:
             phase1_result = self._validate_phase1_rules(mapped_data)
             validation_results["phase1_results"] = phase1_result
             
-            # 2차 검증: AI 맥락 검증 (추후 구현)
+            # 2차 검증: AI 맥락 검증
             phase2_result = self._validate_phase2_ai_context(mapped_data)
             validation_results["phase2_results"] = phase2_result
             
@@ -60,6 +63,9 @@ class DataValidator:
             
             validation_results["errors"] = phase1_result["errors"] + phase2_result["errors"]
             validation_results["warnings"] = phase1_result["warnings"] + phase2_result["warnings"]
+            
+            # 요약 리포트 생성
+            validation_results["summary_report"] = self.report_generator.generate_summary_report(validation_results)
             
         except Exception as e:
             logger.error(f"검증 중 오류 발생: {str(e)}")
@@ -639,19 +645,10 @@ class DataValidator:
     
     def _validate_phase2_ai_context(self, all_sheets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
         """
-        2차 검증: K-IFRS 기준 AI 맥락 검증
+        2차 검증: K-IFRS 1019 기준 AI 맥락 검증
+        AIValidator 클래스로 위임하여 처리합니다.
         """
-        result = {
-            "total_records": 0,
-            "valid_records": 0,
-            "invalid_records": 0,
-            "errors": [],
-            "warnings": []
-        }
-        
-        # TODO: AI 모델 연동 구현 예정
-        
-        return result
+        return self.ai_validator.validate_context(all_sheets)
     
     # ========================================
     # 헬퍼 메서드

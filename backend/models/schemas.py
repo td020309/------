@@ -94,6 +94,7 @@ class ValidationResult(BaseModel):
     errors: List[ValidationError] = Field(default_factory=list, description="오류 목록")
     warnings: List[ValidationError] = Field(default_factory=list, description="경고 목록")
     sheet_results: Dict[str, Any] = Field(default_factory=dict, description="시트별 결과")
+    summary_report: List[str] = Field(default_factory=list, description="요약 리포트 (사용자 확인용 메시지)")
 
 
 class UploadResponse(BaseModel):

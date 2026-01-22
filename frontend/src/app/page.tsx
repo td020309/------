@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import ChatAI from "@/components/ChatAI";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -48,24 +49,46 @@ export default function Home() {
     }
   };
 
-  const startVerification = () => {
+  const startVerification = async () => {
     if (!file) return;
     
     setIsVerifying(true);
-    // Simulate verification process
-    setTimeout(() => {
-      setIsVerifying(false);
-      setVerificationResult({
-        total: 150,
-        errors: [
-          { row: 12, column: "전화번호", issue: "형식이 올바르지 않습니다 (010-0000-0000 형식 필요)", suggestion: "하이픈(-)을 포함하여 입력해주세요." },
-          { row: 45, column: "이름", issue: "특수문자가 포함되어 있습니다", suggestion: "한글 또는 영문 이름만 사용 가능합니다." },
-          { row: 89, column: "이메일", issue: "중복된 데이터가 존재합니다", suggestion: "다른 행(Row 23)에 동일한 이메일이 있습니다." },
-          { row: 102, column: "생년월일", issue: "날짜 형식이 아닙니다", suggestion: "YYYY-MM-DD 형식으로 수정해주세요." },
-        ],
-        successCount: 146
+    
+    try {
+      // FormData로 파일 전송
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      // 백엔드 API 호출
+      const response = await fetch('http://localhost:8000/api/validate', {
+        method: 'POST',
+        body: formData,
       });
-    }, 2000);
+      
+      if (!response.ok) {
+        throw new Error('검증 요청에 실패했습니다');
+      }
+      
+      const data = await response.json();
+      const validationResults = data.validation_results;
+      
+      // 검증 결과 파싱
+      setVerificationResult({
+        filename: data.filename,
+        total: validationResults.total_records,
+        validCount: validationResults.valid_records,
+        invalidCount: validationResults.invalid_records,
+        errors: validationResults.errors || [],
+        warnings: validationResults.warnings || [],
+        summaryReport: validationResults.summary_report || []
+      });
+      
+    } catch (error: any) {
+      console.error('검증 오류:', error);
+      alert(`검증 중 오류가 발생했습니다: ${error.message}`);
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const reset = () => {
@@ -173,7 +196,9 @@ export default function Home() {
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">검증 결과 리포트</h2>
-                  <p className="text-slate-500">총 {verificationResult.total}개의 데이터 중 {verificationResult.errors.length}개의 오류를 발견했습니다.</p>
+                  <p className="text-slate-500">
+                    파일: {verificationResult.filename} | 총 {verificationResult.total}개 데이터 중 {verificationResult.invalidCount}개의 문제 발견
+                  </p>
                 </div>
                 <button 
                   onClick={reset}
@@ -184,6 +209,23 @@ export default function Home() {
                 </button>
               </div>
 
+              {/* 요약 리포트 섹션 */}
+              {verificationResult.summaryReport && verificationResult.summaryReport.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 mb-8">
+                  <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5" />
+                    확인이 필요한 사항
+                  </h3>
+                  <ul className="space-y-2">
+                    {verificationResult.summaryReport.map((report: string, idx: number) => (
+                      <li key={idx} className="text-blue-800 text-sm leading-relaxed">
+                        • {report}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                   <p className="text-sm text-slate-500 mb-1">총 데이터</p>
@@ -191,54 +233,100 @@ export default function Home() {
                 </div>
                 <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 shadow-sm">
                   <p className="text-sm text-emerald-600 mb-1">정상 데이터</p>
-                  <p className="text-2xl font-bold text-emerald-700">{verificationResult.successCount}</p>
+                  <p className="text-2xl font-bold text-emerald-700">{verificationResult.validCount}</p>
                 </div>
-                <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm md:col-span-2">
-                  <p className="text-sm text-red-600 mb-1">발견된 오류</p>
+                <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm">
+                  <p className="text-sm text-red-600 mb-1">오류</p>
                   <p className="text-2xl font-bold text-red-700">{verificationResult.errors.length}건</p>
+                </div>
+                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100 shadow-sm">
+                  <p className="text-sm text-amber-600 mb-1">경고</p>
+                  <p className="text-2xl font-bold text-amber-700">{verificationResult.warnings.length}건</p>
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden mb-12">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200">
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-700">행(Row)</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-700">구분(Column)</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-700">발견된 문제</th>
-                        <th className="px-6 py-4 text-sm font-semibold text-slate-700">해결 방법</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {verificationResult.errors.map((err: any, idx: number) => (
-                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4 text-sm font-medium text-slate-900">{err.row}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">
-                            <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold uppercase">{err.column}</span>
-                          </td>
-                          <td className="px-6 py-4 text-sm">
-                            <div className="flex items-center gap-2 text-red-600">
-                              <AlertCircle className="w-4 h-4" />
-                              {err.issue}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 leading-relaxed">
-                            {err.suggestion}
-                          </td>
+              {/* 오류 목록 */}
+              {verificationResult.errors.length > 0 && (
+                <div className="bg-white rounded-2xl border border-red-200 shadow-xl overflow-hidden mb-6">
+                  <div className="bg-red-50 px-6 py-4 border-b border-red-200">
+                    <h3 className="text-lg font-bold text-red-900 flex items-center gap-2">
+                      <AlertCircle className="w-5 h-5" />
+                      오류 목록 ({verificationResult.errors.length}건)
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">시트</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">행</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">컬럼</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">사원번호</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">오류 내용</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {verificationResult.errors.map((err: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4 text-sm text-slate-600">{err.sheet}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-slate-900">{err.row || '-'}</td>
+                            <td className="px-6 py-4 text-sm text-slate-600">
+                              <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold">{err.column}</span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-600">{err.emp_id || '-'}</td>
+                            <td className="px-6 py-4 text-sm">
+                              <div className="flex items-start gap-2 text-red-600">
+                                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                <span>{err.message}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div className="p-6 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
-                  <p className="text-sm text-slate-500">위 오류를 모두 수정하면 더 정확한 데이터 관리가 가능합니다.</p>
-                  <button className="bg-primary-600 hover:bg-primary-700 text-white px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 shadow-md shadow-primary-600/10">
-                    <Download className="w-4 h-4" />
-                    수정 가이드 다운로드
-                  </button>
+              )}
+
+              {/* 경고 목록 */}
+              {verificationResult.warnings.length > 0 && (
+                <div className="bg-white rounded-2xl border border-amber-200 shadow-xl overflow-hidden mb-12">
+                  <div className="bg-amber-50 px-6 py-4 border-b border-amber-200">
+                    <h3 className="text-lg font-bold text-amber-900 flex items-center gap-2">
+                      <AlertCircle className="w-5 h-5" />
+                      경고 목록 ({verificationResult.warnings.length}건)
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">시트</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">행</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">컬럼</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">사원번호</th>
+                          <th className="px-6 py-4 text-sm font-semibold text-slate-700">경고 내용</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {verificationResult.warnings.map((warn: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4 text-sm text-slate-600">{warn.sheet}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-slate-900">{warn.row || '-'}</td>
+                            <td className="px-6 py-4 text-sm text-slate-600">
+                              <span className="bg-slate-100 px-2 py-1 rounded text-xs font-semibold">{warn.column}</span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-600">{warn.emp_id || '-'}</td>
+                            <td className="px-6 py-4 text-sm text-amber-700">
+                              {warn.message}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -248,6 +336,9 @@ export default function Home() {
       <footer className="py-8 px-6 border-t border-slate-100 text-center bg-slate-50">
         <p className="text-sm text-slate-400">위키소프트 명부검증 시스템</p>
       </footer>
+
+      {/* AI Chat Bot */}
+      <ChatAI />
     </main>
   );
 }
