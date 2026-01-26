@@ -18,6 +18,12 @@ def main():
     )
     
     st.sidebar.divider()
+    
+    # AI 설정
+    st.sidebar.subheader("🤖 AI 분석 설정")
+    openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+    
+    st.sidebar.divider()
     uploaded_file = st.sidebar.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"])
 
     if uploaded_file is not None:
@@ -32,6 +38,38 @@ def main():
                 return
 
             st.success(f"총 {len(processed_data)}개의 시트가 처리되었습니다.")
+            
+            # 검증 섹션
+            st.divider()
+            st.header("🔍 데이터 검증 결과")
+            
+            if st.button("검증 시작"):
+                from validator import DataValidator
+                from ai_analyzer import AIAnalyzer
+                
+                col_v1, col_v2 = st.columns(2)
+                
+                with col_v1:
+                    st.subheader("1. 규칙 기반 검증")
+                    validator = DataValidator(processed_data, base_date, calc_method)
+                    v_results = validator.validate()
+                    if not v_results:
+                        st.info("발견된 규칙 위반 사항이 없습니다.")
+                    else:
+                        for res in v_results:
+                            st.warning(res)
+                            
+                with col_v2:
+                    st.subheader("2. AI 맥락 분석")
+                    if not openai_api_key:
+                        st.error("AI 분석을 위해 OpenAI API Key를 입력해주세요.")
+                    else:
+                        analyzer = AIAnalyzer(openai_api_key)
+                        with st.spinner("AI가 데이터를 분석 중입니다..."):
+                            ai_result = analyzer.analyze(processed_data, base_date, calc_method)
+                            st.write(ai_result)
+            
+            st.divider()
             
             # 탭을 생성하여 시트별로 결과 보기
             tabs = st.tabs(list(processed_data.keys()))
