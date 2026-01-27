@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from processor import ExcelProcessor
+from ai_analyzer import AIAnalyzer
 
 def main():
     st.set_page_config(page_title="엑셀 명부 검증 프로그램", layout="wide")
@@ -118,6 +119,32 @@ def main():
                 else:
                     st.info("검증 가능한 시트가 없습니다.")
             
+            # AI 분석 섹션
+            st.divider()
+            st.header("🤖 AI 심층 분석 (K-IFRS 1019 기준)")
+            
+            if not openai_api_key:
+                st.info("AI 분석을 사용하려면 왼쪽 사이드바에 OpenAI API Key를 입력해 주세요.")
+            else:
+                if st.button("🧠 AI 분석 시작", type="secondary"):
+                    with st.spinner("AI가 K-IFRS 1019 기준에 따라 데이터를 정밀 분석 중입니다..."):
+                        analyzer = AIAnalyzer(openai_api_key)
+                        ai_result = analyzer.analyze(processed_data, base_date, calc_method)
+                        st.session_state['ai_analysis_result'] = ai_result
+                        st.session_state['ai_analysis_done'] = True
+
+            if st.session_state.get('ai_analysis_done', False):
+                st.markdown("### 📋 AI 분석 보고서")
+                st.markdown(st.session_state.get('ai_analysis_result', ""))
+                
+                # 결과 다운로드 버튼
+                st.download_button(
+                    label="AI 분석 결과 다운로드 (TXT)",
+                    data=st.session_state.get('ai_analysis_result', ""),
+                    file_name=f"ai_analysis_{base_date}.txt",
+                    mime="text/plain"
+                )
+
         except Exception as e:
             st.error(f"오류 발생: {e}")
             st.exception(e) # 개발 중 상세 오류 확인용

@@ -1,4 +1,6 @@
 pandas
 streamlit
 openpyxl
+openai
+tabulate
 
