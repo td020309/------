@@ -39,55 +39,84 @@ def main():
 
             st.success(f"총 {len(processed_data)}개의 시트가 처리되었습니다.")
             
-            # 검증 섹션
+            # 원본 데이터 섹션
             st.divider()
-            st.header("🔍 데이터 검증 결과")
+            st.header("📋 원본 데이터")
             
-            if st.button("검증 시작"):
-                from validator import DataValidator
-                from ai_analyzer import AIAnalyzer
-                
-                col_v1, col_v2 = st.columns(2)
-                
-                with col_v1:
-                    st.subheader("1. 규칙 기반 검증")
-                    validator = DataValidator(processed_data, base_date, calc_method)
-                    v_results = validator.validate()
-                    if not v_results:
-                        st.info("발견된 규칙 위반 사항이 없습니다.")
-                    else:
-                        for res in v_results:
-                            st.warning(res)
-                            
-                with col_v2:
-                    st.subheader("2. AI 맥락 분석")
-                    if not openai_api_key:
-                        st.error("AI 분석을 위해 OpenAI API Key를 입력해주세요.")
-                    else:
-                        analyzer = AIAnalyzer(openai_api_key)
-                        with st.spinner("AI가 데이터를 분석 중입니다..."):
-                            ai_result = analyzer.analyze(processed_data, base_date, calc_method)
-                            st.write(ai_result)
+            # 탭을 생성하여 시트별로 원본 데이터 보기
+            data_tabs = st.tabs(list(processed_data.keys()))
             
-            st.divider()
-            
-            # 탭을 생성하여 시트별로 결과 보기
-            tabs = st.tabs(list(processed_data.keys()))
-            
-            for tab, (sheet_name, data) in zip(tabs, processed_data.items()):
+            for tab, (sheet_name, data) in zip(data_tabs, processed_data.items()):
                 with tab:
                     st.subheader(f"'{sheet_name}' 시트 데이터")
                     
                     # 리스트 형태의 데이터를 데이터프레임으로 변환하여 표시
                     df = pd.DataFrame(data)
-                    st.dataframe(df)
+                    st.dataframe(df, width='stretch')
                     
                     col1, col2, col3 = st.columns(3)
                     col1.metric("행 수", len(df))
                     col2.metric("기준일", str(base_date))
                     col3.metric("계산방법", calc_method)
+            
+            # 검증 섹션
+            st.divider()
+            st.header("🔍 데이터 검증")
+            
+            if st.button("🚀 검증 시작", type="primary"):
+                from validator import DataValidator
+                
+                # 검증 실행
+                validator = DataValidator(processed_data, base_date, calc_method)
+                v_results = validator.validate()
+                
+                # 세션 상태에 검증 결과 저장
+                st.session_state['validation_results'] = v_results
+                st.session_state['validation_done'] = True
+            
+            # 검증 결과 표시
+            if st.session_state.get('validation_done', False):
+                v_results = st.session_state.get('validation_results', {})
+                
+                st.divider()
+                st.subheader("📊 검증 결과")
+                
+                # 검증된 시트만 필터링 (데이터가 있는 시트)
+                validated_sheets = [name for name in processed_data.keys() 
+                                   if name in v_results]
+                
+                if validated_sheets:
+                    # 시트별 탭 생성
+                    result_tabs = st.tabs(validated_sheets)
                     
-                    st.info("검증 로직(validator.py)은 추후 연결될 예정입니다.")
+                    for tab, sheet_name in zip(result_tabs, validated_sheets):
+                        with tab:
+                            sheet_errors = v_results.get(sheet_name, {})
+                            
+                            # _global 키 제외하고 사원번호별 오류만 카운트
+                            employee_errors = {k: v for k, v in sheet_errors.items() if k != "_global"}
+                            global_errors = sheet_errors.get("_global", [])
+                            
+                            total_error_count = sum(len(errs) for errs in employee_errors.values()) + len(global_errors)
+                            
+                            if total_error_count == 0:
+                                st.success(f"✅ 오류 0건 - 이상 없음")
+                            else:
+                                st.error(f"⚠️ 총 {total_error_count}건의 오류 발견 (사원 {len(employee_errors)}명)")
+                                
+                                # 전역 오류 먼저 표시
+                                if global_errors:
+                                    with st.expander("🔸 전체 관련 오류", expanded=True):
+                                        for err in global_errors:
+                                            st.warning(f"• {err}")
+                                
+                                # 사원번호별 오류 표시
+                                for emp_id, errors in sorted(employee_errors.items()):
+                                    with st.expander(f"👤 사원번호: {emp_id} ({len(errors)}건)", expanded=False):
+                                        for err in errors:
+                                            st.warning(f"• {err}")
+                else:
+                    st.info("검증 가능한 시트가 없습니다.")
             
         except Exception as e:
             st.error(f"오류 발생: {e}")
