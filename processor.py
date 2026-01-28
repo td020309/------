@@ -267,6 +267,7 @@ class RetirementBenefitProcessor(SheetProcessor):
 
             data = {
                 "구분": "기초자료_요약",
+                "검증기준일": safe_get(23, 8),          # I25 (Index 23, 8)
                 "재직자수_합계": safe_get(27, 8),      # I29 (Index 27, 8)
                 "퇴직자수_합계": safe_get(31, 8),      # I33 (Index 31, 8)
                 "퇴직금_추계액_합계": safe_get(37, 8), # I39 (Index 37, 8)

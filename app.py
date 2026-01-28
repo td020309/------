@@ -139,6 +139,7 @@ def main():
                             col_info1, col_info2 = st.columns(2)
                             with col_info1:
                                 st.markdown("#### 📋 기본 설정 정보")
+                                st.write(f"**• 검증기준일:** {summary.get('검증기준일', '-')}")
                                 st.write(f"**• 정년퇴직연령:** {summary.get('정년퇴직연령', '-')}")
                                 st.write(f"**• 임금피크제 여부:** {summary.get('임금피크제', '-')}")
                                 st.write(f"**• 제도구분:** {summary.get('제도구분', '-')}")
