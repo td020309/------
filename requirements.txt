@@ -4,4 +4,6 @@ openpyxl
 openai
 tabulate
 numpy
+pyarrow
+python-dateutil
 
