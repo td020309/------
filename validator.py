@@ -41,15 +41,21 @@ class DataValidator:
         """다양한 형식의 날짜를 datetime 객체로 변환"""
         if pd.isna(date_val) or date_val is None:
             return None
+        
+        # 이미 datetime 객체인 경우
+        if isinstance(date_val, (datetime, pd.Timestamp)):
+            return pd.to_datetime(date_val)
+            
         try:
             s_date = str(date_val).strip().replace(".0", "")
-            if len(s_date) == 8:  # YYYYMMDD
-                return datetime.strptime(s_date, "%Y%m%d")
-            elif len(s_date) == 6:  # YYMMDD
-                year = int(s_date[:2])
-                year += 2000 if year < 50 else 1900
-                return datetime.strptime(f"{year}{s_date[2:]}", "%Y%m%d")
-            return pd.to_datetime(date_val)
+            if s_date.isdigit():
+                if len(s_date) == 8:  # YYYYMMDD
+                    return datetime.strptime(s_date, "%Y%m%d")
+                elif len(s_date) == 6:  # YYMMDD
+                    year = int(s_date[:2])
+                    year += 2000 if year < 50 else 1900
+                    return datetime.strptime(f"{year}{s_date[2:]}", "%Y%m%d")
+            return pd.to_datetime(s_date)
         except:
             return None
 
@@ -77,15 +83,15 @@ class DataValidator:
         df = pd.DataFrame(data)
         
         # 컬럼명 찾기 (키워드 기반)
-        col_employee_id = self._find_column(df, '사원번호')
+        col_employee_id = self._find_column(df, '사원번호') or self._find_column(df, '사번')
         col_birth_date = self._find_column(df, '생년월일')
-        col_join_date = self._find_column(df, '입사일자')
-        col_salary = self._find_column(df, '기준급여')
-        col_job_type = self._find_column(df, '종업원 구분')
+        col_join_date = self._find_column(df, '입사일')
+        col_salary = self._find_column(df, '기준급여') or self._find_column(df, '급여')
+        col_job_type = self._find_column(df, '종업원 구분') or self._find_column(df, '구분')
         col_curr_estimate = self._find_column(df, '당년도')
         col_next_estimate = self._find_column(df, '차년도')
         col_interim_amount = self._find_column(df, '중간정산액')
-        col_interim_date = self._find_column(df, '사유발생일')
+        col_interim_date = self._find_column(df, '중간정산') or self._find_column(df, '사유발생일')
         
         # 재직자 중복 체크
         if col_employee_id:
@@ -95,11 +101,14 @@ class DataValidator:
                 duplicate_ids = duplicates.unique()
                 for dup_id in duplicate_ids:
                     count = (employee_ids == dup_id).sum()
-                    results.append(f"[{sheet_name}] 재직자 중복 발견: 사원번호 {dup_id} ({count}건)")
+                    results.append({
+                        "category": "사원번호 중복",
+                        "emp_id": self._normalize_employee_id(dup_id),
+                        "detail": f"재직자명부 내 {count}건 중복 존재"
+                    })
         
         for idx, row in df.iterrows():
-            row_id = row.get(col_employee_id, f"Row {idx+1}") if col_employee_id else f"Row {idx+1}"
-            ctx = f"[{sheet_name} | {row_id}]"
+            emp_id = self._normalize_employee_id(row.get(col_employee_id)) if col_employee_id else f"Row {idx+1}"
 
             # 필수값 체크 (blank 검증)
             required_fields = [
@@ -110,24 +119,28 @@ class DataValidator:
                 (col_job_type, '종업원 구분')
             ]
             for col_name, display_name in required_fields:
-                if col_name:  # 컬럼이 존재하는 경우만
+                if col_name:
                     val = row.get(col_name)
                     if pd.isna(val) or val is None or str(val).strip() == "":
-                        results.append(f"{ctx} {display_name}=blank (필수값 누락)")
+                        results.append({
+                            "category": "필수값 누락",
+                            "emp_id": emp_id,
+                            "detail": f"{display_name} 데이터 없음"
+                        })
 
-            # 1-3. 음수 체크
+            # 음수 체크
             curr_estimate = row.get(col_curr_estimate) if col_curr_estimate else None
             next_estimate = row.get(col_next_estimate) if col_next_estimate else None
             interim_amount = row.get(col_interim_amount) if col_interim_amount else None
             
             if curr_estimate is not None and isinstance(curr_estimate, (int, float)) and curr_estimate < 0:
-                results.append(f"{ctx} 퇴직금추계액 < 0: {curr_estimate:,.0f}")
+                results.append({"category": "금액 오류(음수)", "emp_id": emp_id, "detail": f"당년도 추계액 음수 ({curr_estimate:,.0f})"})
             
             if next_estimate is not None and isinstance(next_estimate, (int, float)) and next_estimate < 0:
-                results.append(f"{ctx} 퇴직금추계액(차년도) < 0: {next_estimate:,.0f}")
+                results.append({"category": "금액 오류(음수)", "emp_id": emp_id, "detail": f"차년도 추계액 음수 ({next_estimate:,.0f})"})
             
             if interim_amount is not None and isinstance(interim_amount, (int, float)) and interim_amount < 0:
-                results.append(f"{ctx} 중간정산액 < 0: {interim_amount:,.0f}")
+                results.append({"category": "금액 오류(음수)", "emp_id": emp_id, "detail": f"중간정산액 음수 ({interim_amount:,.0f})"})
 
             # 종업원 구분 > 2 (임원, 계약직) 조건부 체크
             job_type = row.get(col_job_type) if col_job_type else None
@@ -137,66 +150,49 @@ class DataValidator:
                 job_type_num = 0
             
             if job_type_num > 2:
-                # 당년도 퇴직금추계액 = blank or 0
                 if pd.isna(curr_estimate) or curr_estimate is None or curr_estimate == 0:
-                    results.append(f"{ctx} 종업원 구분 > 2: 당년도 퇴직금추계액 = blank or 0")
-                
-                # 차년도 퇴직금추계액 = blank or 0
+                    results.append({"category": "추계액 논리 오류(임원/계약직)", "emp_id": emp_id, "detail": "당년도 추계액이 0 또는 누락됨"})
                 if pd.isna(next_estimate) or next_estimate is None or next_estimate == 0:
-                    results.append(f"{ctx} 종업원 구분 > 2: 차년도 퇴직금추계액 = blank or 0")
-                
-                # 당년도 < 차년도 체크 (차년도가 더 커야 함)
-                if curr_estimate is not None and next_estimate is not None:
-                    if not (curr_estimate < next_estimate):
-                        results.append(f"{ctx} 종업원 구분 > 2: 당년도 추계액({curr_estimate:,.0f}) < 차년도 추계액({next_estimate:,.0f}) 위반")
+                    results.append({"category": "추계액 논리 오류(임원/계약직)", "emp_id": emp_id, "detail": "차년도 추계액이 0 또는 누락됨"})
+                if curr_estimate is not None and next_estimate is not None and not (curr_estimate < next_estimate):
+                    results.append({"category": "추계액 논리 오류(임원/계약직)", "emp_id": emp_id, "detail": f"당년도({curr_estimate:,.0f}) >= 차년도({next_estimate:,.0f})"})
 
             # 날짜 파싱
             birth_date = self._parse_date(row.get(col_birth_date)) if col_birth_date else None
             join_date = self._parse_date(row.get(col_join_date)) if col_join_date else None
             interim_date = self._parse_date(row.get(col_interim_date)) if col_interim_date else None
 
-            # 4. 입사연령 체크 (< 17세 or > 70세)
+            # 입사연령 체크
             if birth_date and join_date:
                 age_at_join = join_date.year - birth_date.year
                 if age_at_join < 17 or age_at_join > 70:
-                    results.append(f"{ctx} 입사연령 < 17세 or 입사연령 > 70세: {age_at_join}세")
+                    results.append({"category": "입사연령 이상", "emp_id": emp_id, "detail": f"입사 시 연령 {age_at_join}세"})
 
-            # 5. 입사일 < 생년월일
-            if birth_date and join_date:
-                if join_date < birth_date:
-                    results.append(f"{ctx} 입사일 < 생년월일: {join_date.date()} < {birth_date.date()}")
+            # 날짜 선후관계
+            if birth_date and join_date and join_date < birth_date:
+                results.append({"category": "날짜 선후 모순", "emp_id": emp_id, "detail": f"입사일({join_date.date()}) < 생년월일({birth_date.date()})"})
 
-            # 6. 중간정산일 <= 입사일
-            if interim_date and join_date:
-                if interim_date <= join_date:
-                    results.append(f"{ctx} 중간정산일 <= 입사일: {interim_date.date()} <= {join_date.date()}")
+            if pd.notna(interim_date) and pd.notna(join_date) and interim_date <= join_date:
+                results.append({"category": "날짜 확인 필요", "emp_id": emp_id, "detail": f"중간정산일({interim_date.date()}) <= 입사일({join_date.date()})"})
 
-            # 7. 시산일(기준일) =< 입사일
-            if join_date and self.base_date:
-                if self.base_date <= join_date:
-                    results.append(f"{ctx} 시산일 =< 입사일: {self.base_date.date()} <= {join_date.date()}")
+            if join_date and self.base_date and self.base_date <= join_date:
+                results.append({"category": "날짜 선후 모순", "emp_id": emp_id, "detail": f"기준일({self.base_date.date()}) <= 입사일({join_date.date()})"})
 
-            # 8. 시산일(기준일) =< 중간정산일
-            if interim_date and self.base_date:
-                if self.base_date <= interim_date:
-                    results.append(f"{ctx} 시산일 =< 중간정산일: {self.base_date.date()} <= {interim_date.date()}")
+            if interim_date and self.base_date and self.base_date <= interim_date:
+                results.append({"category": "날짜 선후 모순", "emp_id": emp_id, "detail": f"기준일({self.base_date.date()}) <= 중간정산일({interim_date.date()})"})
 
-            # 9-11. 날짜 형식 유효성 체크 (월>12 or 일>31)
-            date_fields = [
-                (col_birth_date, '생년월일'),
-                (col_join_date, '입사일'),
-                (col_interim_date, '중간정산일')
-            ]
+            # 날짜 형식 체크
+            date_fields = [(col_birth_date, '생년월일'), (col_join_date, '입사일'), (col_interim_date, '중간정산일')]
             for col, label in date_fields:
                 if col:
                     err = self._check_date_validity(row.get(col), label)
                     if err:
-                        results.append(f"{ctx} {err}")
+                        results.append({"category": "날짜 형식 오류", "emp_id": emp_id, "detail": err})
 
-            # 12. 기준급여 < 1,700,000 (핵심)
+            # 기준급여 체크
             salary = row.get(col_salary) if col_salary else None
             if salary is not None and isinstance(salary, (int, float)) and salary < 1700000:
-                results.append(f"{ctx} 기준급여 < 1,700,000 (핵심): {salary:,.0f}원")
+                results.append({"category": "저임금 의심", "emp_id": emp_id, "detail": f"기준급여 {salary:,.0f}원 (170만 원 미만)"})
 
         return results
 
@@ -211,10 +207,9 @@ class DataValidator:
         col_gender = self._find_column(df, '성별')
         
         for idx, row in df.iterrows():
-            row_id = row.get(col_employee_id, f"Row {idx+1}") if col_employee_id else f"Row {idx+1}"
-            ctx = f"[{sheet_name} | {row_id}]"
+            emp_id = self._normalize_employee_id(row.get(col_employee_id)) if col_employee_id else f"Row {idx+1}"
 
-            # 필수값 체크 (사원번호, 생년월일, 성별만)
+            # 필수값 체크
             required_fields = [
                 (col_employee_id, '사원번호'),
                 (col_birth_date, '생년월일'),
@@ -224,7 +219,11 @@ class DataValidator:
                 if col_name:
                     val = row.get(col_name)
                     if pd.isna(val) or val is None or str(val).strip() == "":
-                        results.append(f"{ctx} {display_name}=blank (필수값 누락)")
+                        results.append({
+                            "category": "필수값 누락",
+                            "emp_id": emp_id,
+                            "detail": f"{display_name} 데이터 없음"
+                        })
 
         return results
 
@@ -237,13 +236,12 @@ class DataValidator:
         col_employee_id = self._find_column(df, '사원번호')
         col_birth_date = self._find_column(df, '생년월일')
         col_gender = self._find_column(df, '성별')
-        col_reason = self._find_column(df, '사유', exclude='발생일')  # "사유발생일" 제외
+        col_reason = self._find_column(df, '사유', exclude='발생일')
         
         for idx, row in df.iterrows():
-            row_id = row.get(col_employee_id, f"Row {idx+1}") if col_employee_id else f"Row {idx+1}"
-            ctx = f"[{sheet_name} | {row_id}]"
+            emp_id = self._normalize_employee_id(row.get(col_employee_id)) if col_employee_id else f"Row {idx+1}"
 
-            # 필수값 체크 (사원번호, 생년월일, 성별, 사유)
+            # 필수값 체크
             required_fields = [
                 (col_employee_id, '사원번호'),
                 (col_birth_date, '생년월일'),
@@ -254,7 +252,11 @@ class DataValidator:
                 if col_name:
                     val = row.get(col_name)
                     if pd.isna(val) or val is None or str(val).strip() == "":
-                        results.append(f"{ctx} {display_name}=blank (필수값 누락)")
+                        results.append({
+                            "category": "필수값 누락",
+                            "emp_id": emp_id,
+                            "detail": f"{display_name} 데이터 없음"
+                        })
             
             # 사유별 조건부 검증
             reason = row.get(col_reason) if col_reason else None
@@ -263,194 +265,134 @@ class DataValidator:
             if reason is not None and employee_id:
                 try:
                     reason_num = int(float(reason))
-                    
-                    # 사유 1, 5번: 재직자명부에 반드시 있어야 함
-                    if reason_num in [1, 5]:
+                    # 사유 1번: 관계사전입 -> 재직자명부에 반드시 있어야 함
+                    if reason_num == 1:
                         if employee_id not in active_ids:
-                            results.append(f"{ctx} 사유 {reason_num}번: 재직자명부에 없음 (재직자명부 포함 필수)")
+                            results.append({"category": "명부 간 불일치", "emp_id": employee_id, "detail": "사유 1번(관계사전입): 재직자명부에 없음 (재직자명부 포함 필수)"})
                     
-                    # 사유 2번: 퇴직자명부에 있으면 안됨 (중복)
+                    # 사유 2번: 관계사전출 -> 퇴직자명부와 중복 체크
                     elif reason_num == 2:
                         if employee_id in retired_ids:
-                            results.append(f"{ctx} 사유 2번: 퇴직자명부와 중복 (사원번호 {employee_id})")
+                            results.append({"category": "명부 간 불일치", "emp_id": employee_id, "detail": "사유 2번(관계사전출): 퇴직자명부와 중복"})
+                    
+                    # 사유 5번: 기타장기종업원 -> 재직자명부에 반드시 있어야 함
+                    elif reason_num == 5:
+                        if employee_id not in active_ids:
+                            results.append({"category": "명부 간 불일치", "emp_id": employee_id, "detail": "사유 5번(기타장기종업원): 기타장기재직자는 재직자명부에 포함되어야 합니다."})
                 except:
                     pass
         
         return results
 
     def _validate_retirement_benefit_summary(self, sheet_name, data):
-        """기초자료 퇴직급여 시트 검증 - 재직자수, 퇴직자수, 당년도 추계액 합계 체크"""
+        """기초자료 퇴직급여 시트 검증"""
         results = []
-        
         if not data or len(data) == 0:
             return results
         
-        summary = data[0]  # 첫 번째 레코드에 요약 정보가 있음
-        
-        # 기초자료에서 읽은 값
+        summary = data[0]
         reported_active_count = summary.get('재직자수_합계')
         reported_retired_count = summary.get('퇴직자수_합계')
         reported_estimate_sum = summary.get('퇴직금_추계액_합계')
         
-        # 실제 명부에서 계산
         actual_active_count = 0
         actual_retired_count = 0
         actual_estimate_sum = 0
         
         for other_sheet_name, other_data in self.all_data.items():
             df = pd.DataFrame(other_data)
-            
-            # 재직자명부 (기타장기재직자 제외)
             if "재직자" in other_sheet_name and "기타장기" not in other_sheet_name:
                 actual_active_count = len(df)
-                
-                # 당년도 퇴직금추계액 합계
                 col_curr_estimate = self._find_column(df, '당년도')
                 if col_curr_estimate:
-                    estimate_values = pd.to_numeric(df[col_curr_estimate], errors='coerce')
-                    actual_estimate_sum = estimate_values.sum()
-            
-            # 퇴직자명부
+                    actual_estimate_sum = pd.to_numeric(df[col_curr_estimate], errors='coerce').sum()
             elif "퇴직자" in other_sheet_name:
                 actual_retired_count = len(df)
         
-        # 비교 검증
-        ctx = f"[{sheet_name} | 합계검증]"
-        
-        # 재직자수 체크
+        # 합계 불일치는 _global 성격이지만, 통일성을 위해 emp_id=None 혹은 "전체"로 처리
         if reported_active_count is not None:
             try:
                 reported = int(float(reported_active_count))
                 if reported != actual_active_count:
-                    results.append(f"{ctx} 재직자수 불일치: 기초자료({reported:,}명) ≠ 재직자명부({actual_active_count:,}명)")
-            except:
-                pass
+                    results.append({"category": "합계 불일치", "emp_id": "전체", "detail": f"재직자수: 기초자료({reported:,}명) ≠ 명부({actual_active_count:,}명)"})
+            except: pass
         
-        # 퇴직자수 체크
         if reported_retired_count is not None:
             try:
                 reported = int(float(reported_retired_count))
                 if reported != actual_retired_count:
-                    results.append(f"{ctx} 퇴직자수 불일치: 기초자료({reported:,}명) ≠ 퇴직자명부({actual_retired_count:,}명)")
-            except:
-                pass
+                    results.append({"category": "합계 불일치", "emp_id": "전체", "detail": f"퇴직자수: 기초자료({reported:,}명) ≠ 명부({actual_retired_count:,}명)"})
+            except: pass
         
-        # 당년도 퇴직금 추계액 합계 체크
         if reported_estimate_sum is not None:
             try:
                 reported = float(reported_estimate_sum)
-                # 소수점 오차 허용 (1원 단위)
                 if abs(reported - actual_estimate_sum) > 1:
-                    results.append(f"{ctx} 당년도 퇴직금추계액 합계 불일치: 기초자료({reported:,.0f}원) ≠ 재직자명부 합계({actual_estimate_sum:,.0f}원)")
-            except:
-                pass
+                    results.append({"category": "합계 불일치", "emp_id": "전체", "detail": f"추계액 합계: 기초자료({reported:,.0f}) ≠ 명부합계({actual_estimate_sum:,.0f})"})
+            except: pass
         
         return results
 
     def validate(self):
         """
-        데이터 검증을 수행하고 시트별, 사원번호별로 구조화된 오류를 반환합니다.
+        데이터 검증을 수행하고 시트별, 오류 종류별로 구조화된 결과를 반환합니다.
         
         Returns:
             dict: {
                 "시트명": {
-                    "사원번호1": ["오류1", "오류2", ...],
-                    "사원번호2": ["오류1", ...],
-                    "_global": ["전체 관련 오류"]  # 특정 사원에 귀속되지 않는 오류
-                },
-                ...
+                    "오류종류1": [ {"emp_id": "ID1", "detail": "내용"}, ... ],
+                    ...
+                }
             }
         """
-        # 시트별, 사원번호별 오류 저장
         structured_results = {}
-        
-        # 사원번호 수집 (명부 간 교차 검증용)
         active_employee_ids = set()
         retired_employee_ids = set()
         
+        # 1. 사원번호 수집
         for sheet_name, data in self.all_data.items():
             df = pd.DataFrame(data)
             col_employee_id = self._find_column(df, '사원번호')
             if col_employee_id:
-                # 사원번호 정규화하여 수집
-                employee_ids = set(
-                    self._normalize_employee_id(eid) 
-                    for eid in df[col_employee_id].dropna()
-                    if self._normalize_employee_id(eid)
-                )
-                
-                # 재직자명부 (기타장기재직자 제외)
+                ids = set(self._normalize_employee_id(eid) for eid in df[col_employee_id].dropna() if self._normalize_employee_id(eid))
                 if "재직자" in sheet_name and "기타장기" not in sheet_name:
-                    active_employee_ids.update(employee_ids)
+                    active_employee_ids.update(ids)
                 elif "퇴직자" in sheet_name:
-                    retired_employee_ids.update(employee_ids)
+                    retired_employee_ids.update(ids)
         
-        # 재직자-퇴직자 중복 체크 - 두 시트 모두에 기록
+        # 2. 명부 간 교차 중복 체크
         duplicates = active_employee_ids & retired_employee_ids
         if duplicates:
             for sheet_name in self.all_data.keys():
                 if ("재직자" in sheet_name and "기타장기" not in sheet_name) or "퇴직자" in sheet_name:
-                    if sheet_name not in structured_results:
-                        structured_results[sheet_name] = {}
+                    if sheet_name not in structured_results: structured_results[sheet_name] = {}
+                    if "명부 간 중복" not in structured_results[sheet_name]: structured_results[sheet_name]["명부 간 중복"] = []
                     for dup_id in sorted(duplicates):
-                        if dup_id not in structured_results[sheet_name]:
-                            structured_results[sheet_name][dup_id] = []
-                        structured_results[sheet_name][dup_id].append(f"재직자명부와 퇴직자명부에 모두 존재")
-        
-        # 각 시트별 검증
+                        structured_results[sheet_name]["명부 간 중복"].append({"emp_id": dup_id, "detail": "재직자명부와 퇴직자명부에 모두 존재"})
+
+        # 3. 각 시트별 검증 실행
         for sheet_name, data in self.all_data.items():
-            if sheet_name not in structured_results:
-                structured_results[sheet_name] = {}
+            if sheet_name not in structured_results: structured_results[sheet_name] = {}
             
-            # 재직자명부 검증 (기타장기재직자명부 제외)
+            errors = []
             if "재직자" in sheet_name and "기타장기" not in sheet_name:
                 errors = self._validate_active_employees(sheet_name, data)
-            # 퇴직자명부 검증
             elif "퇴직자" in sheet_name:
                 errors = self._validate_retired_employees(sheet_name, data)
-            # 추가명부(중간정산자명부) 검증
             elif "추가" in sheet_name or "중간정산" in sheet_name:
                 errors = self._validate_additional_employees(sheet_name, data, active_employee_ids, retired_employee_ids)
-            # 기초자료 퇴직급여 시트 검증
             elif "기초자료" in sheet_name and "퇴직급여" in sheet_name:
                 errors = self._validate_retirement_benefit_summary(sheet_name, data)
-            else:
-                errors = []
             
-            # 오류를 사원번호별로 파싱하여 구조화
+            # 카테고리별로 묶기
             for err in errors:
-                employee_id = self._extract_employee_id_from_error(err)
-                if employee_id:
-                    if employee_id not in structured_results[sheet_name]:
-                        structured_results[sheet_name][employee_id] = []
-                    # 오류 메시지에서 [시트명 | 사원번호] 부분 제거
-                    clean_error = self._clean_error_message(err)
-                    structured_results[sheet_name][employee_id].append(clean_error)
-                else:
-                    # 전역 오류
-                    if "_global" not in structured_results[sheet_name]:
-                        structured_results[sheet_name]["_global"] = []
-                    structured_results[sheet_name]["_global"].append(err)
+                cat = err["category"]
+                if cat not in structured_results[sheet_name]:
+                    structured_results[sheet_name][cat] = []
+                structured_results[sheet_name][cat].append({
+                    "emp_id": err["emp_id"],
+                    "detail": err["detail"]
+                })
         
         return structured_results
-    
-    def _extract_employee_id_from_error(self, error_msg):
-        """오류 메시지에서 사원번호 추출"""
-        import re
-        # [시트명 | 사원번호] 형식에서 사원번호 추출
-        match = re.search(r'\[.*?\|\s*([^\]]+)\]', error_msg)
-        if match:
-            emp_id = match.group(1).strip()
-            # "Row N" 형식이면 None 반환
-            if emp_id.startswith("Row"):
-                return None
-            return self._normalize_employee_id(emp_id)
-        return None
-    
-    def _clean_error_message(self, error_msg):
-        """오류 메시지에서 [시트명 | 사원번호] 부분 제거"""
-        import re
-        # [시트명 | 사원번호] 형식 제거
-        cleaned = re.sub(r'\[.*?\|\s*[^\]]+\]\s*', '', error_msg)
-        return cleaned.strip()
 

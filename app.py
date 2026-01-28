@@ -11,7 +11,25 @@ def main():
     
     # 검증 기준 설정
     st.sidebar.subheader("📌 검증 설정")
-    base_date = st.sidebar.date_input("검증 기준일", value=pd.Timestamp.now())
+    
+    # 날짜 입력을 텍스트로 변경 (사용자 요청: 숫자로 입력하는 것이 편리함)
+    default_date = pd.Timestamp.now().strftime("%Y%m%d")
+    base_date_input = st.sidebar.text_input(
+        "검증 기준일 (8자리 숫자)", 
+        value=default_date,
+        help="예: 20241231"
+    )
+    
+    try:
+        if len(base_date_input) == 8:
+            base_date = pd.to_datetime(base_date_input, format='%Y%m%d').date()
+        else:
+            base_date = pd.to_datetime(base_date_input).date()
+        st.sidebar.caption(f"📅 인식된 날짜: {base_date.strftime('%Y-%m-%d')}")
+    except:
+        st.sidebar.error("⚠️ 날짜 형식이 잘못되었습니다. (예: 20241231)")
+        return
+
     calc_method = st.sidebar.selectbox(
         "계산 방법",
         options=["월상", "월사", "일할"],
@@ -40,14 +58,11 @@ def main():
 
             st.success(f"총 {len(processed_data)}개의 시트가 처리되었습니다.")
             
-            # 메인 탭 생성
-            tab_original, tab_rule, tab_ai = st.tabs(["📋 원본 데이터", "🔍 규칙 기반 검증", "🤖 AI 심층 분석"])
-
-            # --- 1. 원본 데이터 탭 ---
-            with tab_original:
-                st.header("원본 데이터 확인")
-                # 시트별 내부 탭
-                sheet_tabs = st.tabs(list(processed_data.keys()))
+            # --- 1. 원본 데이터 섹션 (상단 이동) ---
+            st.header("📋 원본 데이터 확인")
+            sheet_names = list(processed_data.keys())
+            if sheet_names:
+                sheet_tabs = st.tabs(sheet_names)
                 for tab, (sheet_name, data) in zip(sheet_tabs, processed_data.items()):
                     with tab:
                         st.subheader(f"'{sheet_name}' 시트 데이터")
@@ -56,10 +71,21 @@ def main():
                         
                         col1, col2, col3 = st.columns(3)
                         col1.metric("행 수", len(df))
-                        col2.metric("기준일", str(base_date))
+                        col2.metric("기준일", base_date.strftime('%Y-%m-%d'))
                         col3.metric("계산방법", calc_method)
             
-            # --- 2. 규칙 기반 검증 탭 ---
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.divider()
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # --- 2. 검증 및 분석 섹션 (하단) ---
+            tab_rule, tab_calc, tab_ai = st.tabs([
+                "🔍 규칙 기반 검증", 
+                "🧮 추계액 검증", 
+                "🤖 AI 심층 분석"
+            ])
+
+            # --- 2-1. 규칙 기반 검증 탭 ---
             with tab_rule:
                 st.header("데이터 검증 (Hard Rules)")
                 if st.button("🚀 규칙 기반 검증 시작", type="primary", key="btn_rule"):
@@ -78,30 +104,132 @@ def main():
                         result_tabs = st.tabs(validated_sheets)
                         for tab, sheet_name in zip(result_tabs, validated_sheets):
                             with tab:
-                                sheet_errors = v_results.get(sheet_name, {})
-                                employee_errors = {k: v for k, v in sheet_errors.items() if k != "_global"}
-                                global_errors = sheet_errors.get("_global", [])
-                                total_error_count = sum(len(errs) for errs in employee_errors.values()) + len(global_errors)
+                                sheet_results = v_results.get(sheet_name, {})
                                 
-                                if total_error_count == 0:
+                                if not sheet_results:
                                     st.success("✅ 오류 0건 - 이상 없음")
                                 else:
-                                    st.error(f"⚠️ 총 {total_error_count}건의 오류 발견 (사원 {len(employee_errors)}명)")
-                                    if global_errors:
-                                        with st.expander("🔸 전체 관련 오류", expanded=True):
-                                            for err in global_errors:
-                                                st.warning(f"• {err}")
-                                    for emp_id, errors in sorted(employee_errors.items()):
-                                        with st.expander(f"👤 사원번호: {emp_id} ({len(errors)}건)", expanded=False):
-                                            for err in errors:
-                                                st.warning(f"• {err}")
+                                    total_errors = sum(len(items) for items in sheet_results.values())
+                                    st.error(f"⚠️ 총 {total_errors}건의 이슈 발견")
+                                    
+                                    # 오류 종류별로 표시
+                                    for category, items in sheet_results.items():
+                                        with st.expander(f"🔸 {category} ({len(items)}건)", expanded=True):
+                                            # 데이터프레임 형태로 표시 (스크롤 가능하도록 height 설정)
+                                            err_df = pd.DataFrame(items)
+                                            err_df.columns = ["사원번호", "상세내용"]
+                                            st.dataframe(err_df, use_container_width=True, height=300, hide_index=True)
                                 
-                                # 하단 여백 추가
-                                st.markdown("<br>" * 15, unsafe_allow_html=True)
+                                # 하단 여백 충분히 추가
+                                st.markdown("<br>" * 30, unsafe_allow_html=True)
                     else:
                         st.info("검증 가능한 시트가 없습니다.")
+                        st.markdown("<br>" * 30, unsafe_allow_html=True)
+                else:
+                    # 초기 상태에서도 여백 확보
+                    st.markdown("<br>" * 30, unsafe_allow_html=True)
 
-            # --- 3. AI 심층 분석 탭 ---
+            # --- 2-2. 추계액 검증 탭 (재직자 전용) ---
+            with tab_calc:
+                st.header("🧮 재직자 추계액 계산 검증")
+                
+                # 재직자 명부 시트 찾기
+                active_sheets = [name for name in processed_data.keys() if "재직자" in name and "기타장기" not in name]
+                
+                if not active_sheets:
+                    st.info("추계액 검증을 위한 '재직자명부' 시트가 없습니다.")
+                else:
+                    # 첫 번째 재직자 명부를 자동으로 선택
+                    selected_active_sheet = active_sheets[0]
+                    
+                    if st.button("📊 추계액 시뮬레이션 실행", type="primary"):
+                        from validatorcalculate import EstimateValidator
+                        
+                        active_data = processed_data[selected_active_sheet]
+                        df_active = pd.DataFrame(active_data)
+                        
+                        # 검증기 초기화 및 실행
+                        calc_validator = EstimateValidator(df_active, base_date, calc_method)
+                        result_df = calc_validator.validate_calculation()
+                        
+                        # 사원번호를 정수형으로 변환 (사용자 요청사항)
+                        if '사원번호' in result_df.columns:
+                            result_df['사원번호'] = pd.to_numeric(result_df['사원번호'], errors='coerce').fillna(0).astype(int)
+                        
+                        summary = calc_validator.get_summary(result_df)
+                        
+                        # 결과 요약 표시
+                        st.subheader(f"'{selected_active_sheet}' 계산 검토 결과")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("전체 대상", f"{summary['total_count']}명")
+                        col2.metric("불일치 의심", f"{summary['error_count']}명", delta_color="inverse")
+                        col3.metric("일치율", f"{summary['match_rate']:.1f}%")
+
+                        # 오차율별 상세 내역 표시 (이미지 요청사항 반영)
+                        st.divider()
+                        
+                        # 데이터 준비
+                        col_original = calc_validator._find_column('당년도')
+                        col_salary = calc_validator._find_column('기준급여')
+                        col_emp_id = calc_validator._find_column('사원번호')
+
+                        # 오차율 5% ~ 10% 미만
+                        df_mid_error = result_df[(result_df['오차율'] >= 5) & (result_df['오차율'] < 10)].copy()
+                        
+                        st.markdown(f"#### 🟡 오차율 5% ~ 10% 미만 ({len(df_mid_error)}건)")
+                        
+                        display_df_mid = pd.DataFrame(columns=['사원번호', '계산액', '고객사액', '오차율'])
+                        if not df_mid_error.empty:
+                            display_df_mid['사원번호'] = df_mid_error['사원번호']
+                            display_df_mid['계산액'] = df_mid_error['시스템_추계액'].map('{:,.0f}원'.format)
+                            display_df_mid['고객사액'] = df_mid_error['고객사_추계액'].map('{:,.0f}원'.format)
+                            display_df_mid['오차율'] = df_mid_error['오차율'].map('{:.2f}%'.format)
+                        
+                        st.dataframe(display_df_mid, use_container_width=True, height=250, hide_index=True)
+
+                        # 오차율 10% 이상 필터링
+                        df_high_error = result_df[result_df['오차율'] >= 10].copy()
+                        
+                        st.markdown(f"#### 🔴 오차율 10% 이상 ({len(df_high_error)}건)")
+                        
+                        # 표시용 데이터프레임 가공
+                        display_df = pd.DataFrame(columns=['사원번호', '계산액', '고객사액', '오차율'])
+                        if not df_high_error.empty:
+                            display_df['사원번호'] = df_high_error['사원번호']
+                            display_df['계산액'] = df_high_error['시스템_추계액'].map('{:,.0f}원'.format)
+                            display_df['고객사액'] = df_high_error['고객사_추계액'].map('{:,.0f}원'.format)
+                            display_df['오차율'] = df_high_error['오차율'].map('{:.2f}%'.format)
+                        
+                        # 데이터가 없어도 칸은 보여줌
+                        st.dataframe(display_df, use_container_width=True, height=250, hide_index=True)
+
+                        # --- 오차율 TOP 5 추가 ---
+                        st.markdown("#### 🏆 오차율 TOP 5 (가장 높은 5명)")
+                        df_top5 = result_df.sort_values(by='오차율', ascending=False).head(5).copy()
+                        
+                        display_df_top5 = pd.DataFrame(columns=['사원번호', '계산액', '고객사액', '오차율'])
+                        if not df_top5.empty:
+                            display_df_top5['사원번호'] = df_top5['사원번호']
+                            display_df_top5['계산액'] = df_top5['시스템_추계액'].map('{:,.0f}원'.format)
+                            display_df_top5['고객사액'] = df_top5['고객사_추계액'].map('{:,.0f}원'.format)
+                            display_df_top5['오차율'] = df_top5['오차율'].map('{:.2f}%'.format)
+                        
+                        st.dataframe(display_df_top5, use_container_width=True, hide_index=True)
+                        # -----------------------
+
+                        # 전체 결과 데이터프레임 (접기 가능)
+                        with st.expander("전체 검증 데이터 상세 보기"):
+                            # 가독성을 위해 컬럼 순서 조정
+                            final_cols = ['사원번호', '시스템_추계액', '고객사_추계액', '오차율', '시스템_근속연수', '기준급여', '적용배수', '휴직차감']
+                            st.dataframe(result_df[final_cols], use_container_width=True, hide_index=True)
+                        
+                        st.success("시뮬레이션이 완료되었습니다. 제공해주실 알고리즘에 따라 '시스템_추계액'이 계산될 예정입니다.")
+
+                # 하단 여백 충분히 추가
+                st.markdown("<br>" * 30, unsafe_allow_html=True)
+
+            # --- 2-3. AI 심층 분석 탭 ---
             with tab_ai:
                 st.header("AI 심층 분석 (K-IFRS 1019)")
                 if not openai_api_key:
@@ -124,8 +252,8 @@ def main():
                             mime="text/plain"
                         )
                 
-                # 하단 여백 추가
-                st.markdown("<br>" * 15, unsafe_allow_html=True)
+                # 하단 여백 충분히 추가
+                st.markdown("<br>" * 30, unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"오류 발생: {e}")
