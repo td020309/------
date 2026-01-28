@@ -235,10 +235,21 @@ def main():
                 if not openai_api_key:
                     st.info("AI 분석을 사용하려면 왼쪽 사이드바에 OpenAI API Key를 입력해 주세요.")
                 else:
-                    if st.button("🧠 AI 분석 시작", type="secondary", key="btn_ai"):
-                        with st.spinner("AI가 K-IFRS 1019 기준에 따라 데이터를 정밀 분석 중입니다..."):
+                    if st.button("🧠 AI 종합 분석 시작", type="secondary", key="btn_ai"):
+                        with st.spinner("AI가 정제 데이터와 규칙 검증 결과를 통합 분석 중입니다..."):
+                            # 규칙 기반 검증이 수행되지 않았다면 여기서 수행
+                            if 'validation_results' not in st.session_state:
+                                from validator import DataValidator
+                                validator = DataValidator(processed_data, base_date, calc_method)
+                                st.session_state['validation_results'] = validator.validate()
+                            
                             analyzer = AIAnalyzer(openai_api_key)
-                            ai_result = analyzer.analyze(processed_data, base_date, calc_method)
+                            ai_result = analyzer.analyze(
+                                processed_data, 
+                                st.session_state['validation_results'], 
+                                base_date, 
+                                calc_method
+                            )
                             st.session_state['ai_analysis_result'] = ai_result
                             st.session_state['ai_analysis_done'] = True
 
