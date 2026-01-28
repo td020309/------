@@ -226,15 +226,56 @@ class RetirementBenefitProcessor(SheetProcessor):
         I29 : 재직자수 합계
         I33 : 퇴직자수 합계
         I39 : 퇴직금 추계액 합계
+
+        추가 추출 항목:
+        F103 : 정년퇴직연령
+        F104 : 임금피크제 (YES or NO)
+        F109 : 제도구분
+        I112 : 연봉제 or 호봉제
+        E113-I118 : 임금상승률
+        D121 : 할인율 산출기준
         """
         try:
             # Excel 좌표 -> Pandas iloc 변환 (header=0 가정 시 Row N은 Index N-2)
-            # Column I는 9번째 열이므로 Index 8
+            # Column F=5, I=8, E=4, D=3
+            
+            def safe_get(r, c):
+                if r < len(self.raw_df) and c < len(self.raw_df.columns):
+                    val = self.raw_df.iloc[r, c]
+                    # NaN이나 NaT는 None으로 변환
+                    if pd.isna(val):
+                        return None
+                    return val
+                return None
+
+            # 임금상승률 (E113-F118) 추출: 연도와 값만 추출
+            wage_growth_rates = []
+            for r in range(111, 117): # Row 113 to 118 (Index 111-116)
+                year = safe_get(r, 4)  # Column E (Index 4)
+                rate = safe_get(r, 5)  # Column F (Index 5)
+                if year is not None or rate is not None:
+                    # 0.0% 같은 백분율 처리
+                    if isinstance(rate, (float, int)):
+                        rate_str = f"{rate * 100:.1f}%" if rate < 1 else f"{rate:.1f}%"
+                    else:
+                        rate_str = str(rate) if rate else "-"
+                    
+                    wage_growth_rates.append({
+                        "연도": str(year) if year else "-",
+                        "상승률": rate_str
+                    })
+
             data = {
                 "구분": "기초자료_요약",
-                "재직자수_합계": self.raw_df.iloc[27, 8] if len(self.raw_df) > 27 else None,
-                "퇴직자수_합계": self.raw_df.iloc[31, 8] if len(self.raw_df) > 31 else None,
-                "퇴직금_추계액_합계": self.raw_df.iloc[37, 8] if len(self.raw_df) > 37 else None
+                "재직자수_합계": safe_get(27, 8),      # I29 (Index 27, 8)
+                "퇴직자수_합계": safe_get(31, 8),      # I33 (Index 31, 8)
+                "퇴직금_추계액_합계": safe_get(37, 8), # I39 (Index 37, 8)
+                "정년퇴직연령": safe_get(101, 5),      # F103 (Index 101, 5)
+                "임금피크제": safe_get(102, 5),        # F104 (Index 102, 5)
+                "제도구분": safe_get(107, 5),          # F109 (Index 107, 5)
+                "연봉제_호봉제": safe_get(110, 8),      # I112 (Index 110, 8)
+                "임금상승률": wage_growth_rates,       # 리스트 객체
+                "할인율_산출기준": safe_get(119, 3)     # D121 (Index 119, 3)
             }
             # 다른 프로세서들과 형식을 맞추기 위해 리스트에 담아 반환
             return [data]

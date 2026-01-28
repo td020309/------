@@ -181,6 +181,15 @@ class DataValidator:
             if interim_date and self.base_date and self.base_date <= interim_date:
                 results.append({"category": "날짜 선후 모순", "emp_id": emp_id, "detail": f"기준일({self.base_date.date()}) <= 중간정산일({interim_date.date()})"})
 
+            if interim_date and self.base_date and interim_date.year == self.base_date.year:
+                interim_amount = row.get(col_interim_amount) if col_interim_amount else None
+                if pd.isna(interim_amount) or interim_amount is None or interim_amount == 0:
+                    results.append({
+                        "category": "중간정산액 누락", 
+                        "emp_id": emp_id, 
+                        "detail": f"중간정산일({interim_date.year}년)이 기준일과 같으나 중간정산액이 0원 혹은 누락됨"
+                    })
+
             # 날짜 형식 체크
             date_fields = [(col_birth_date, '생년월일'), (col_join_date, '입사일'), (col_interim_date, '중간정산일')]
             for col, label in date_fields:

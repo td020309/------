@@ -7,45 +7,112 @@ def main():
     st.set_page_config(page_title="엑셀 명부 검증 프로그램", layout="wide")
     st.title("📊 엑셀 명부 검증 프로그램")
     
-    st.sidebar.header("설정")
+    # --- 사이드바: 사용법 ---
+    with st.sidebar:
+        st.header("📖 사용법")
+        st.markdown("""
+        1. **파일 업로드**: '엑셀 파일 업로드' 영역에 검증할 파일을 올립니다.
+        2. **검증 설정**: 기준일과 퇴직금 계산 방식(월상/월사/일할)을 확인합니다.
+        3. **데이터 확인**: 업로드된 시트별 데이터를 확인합니다.
+        4. **검증 실행**: 하단의 탭을 클릭하여 각 검증을 진행합니다.
+           - **규칙 기반**: 주민번호, 날짜 형식 등 데이터 정합성 체크
+           - **추계액 검증**: 퇴직금 추계액 계산식 검증
+           - **AI 심층 분석**: AI를 통한 종합 분석 (API 키 필요)
+        
+        ---
+        *문의: 시스템 관리자*
+        """)
     
-    # 검증 기준 설정
-    st.sidebar.subheader("📌 검증 설정")
+    # --- 상단: 입력 섹션 ---
+    st.header("📥 입력 정보 및 설정")
+    uploaded_file = st.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"])
     
-    # 날짜 입력을 텍스트로 변경 (사용자 요청: 숫자로 입력하는 것이 편리함)
-    default_date = pd.Timestamp.now().strftime("%Y%m%d")
-    base_date_input = st.sidebar.text_input(
-        "검증 기준일 (8자리 숫자)", 
-        value=default_date,
-        help="예: 20241231"
-    )
-    
-    try:
-        if len(base_date_input) == 8:
-            base_date = pd.to_datetime(base_date_input, format='%Y%m%d').date()
-        else:
-            base_date = pd.to_datetime(base_date_input).date()
-        st.sidebar.caption(f"📅 인식된 날짜: {base_date.strftime('%Y-%m-%d')}")
-    except:
-        st.sidebar.error("⚠️ 날짜 형식이 잘못되었습니다. (예: 20241231)")
-        return
-
-    calc_method = st.sidebar.selectbox(
-        "계산 방법",
-        options=["월상", "월사", "일할"],
-        help="월상: 월의 첫날 기준, 월사: 월의 마지막날 기준, 일할: 실제 일수 기준"
-    )
-    
-    st.sidebar.divider()
-    
-    # AI 설정
-    st.sidebar.subheader("🤖 AI 분석 설정")
-    openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
-    
-    st.sidebar.divider()
-    uploaded_file = st.sidebar.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"])
-
     if uploaded_file is not None:
+        # 레이아웃 개선: 2행 2열 구조로 변경
+        row1_col1, row1_col2 = st.columns(2)
+        row2_col1, row2_col2 = st.columns(2)
+        
+        with row1_col1:
+            st.markdown("#### 📌 검증 기준일")
+            default_date = pd.Timestamp.now().strftime("%Y%m%d")
+            base_date_input = st.text_input(
+                "날짜 입력 (8자리 숫자)", 
+                value=default_date,
+                label_visibility="collapsed" # 레이블 중복 방지
+            )
+            try:
+                if len(base_date_input) == 8:
+                    base_date = pd.to_datetime(base_date_input, format='%Y%m%d').date()
+                else:
+                    base_date = pd.to_datetime(base_date_input).date()
+                st.caption(f"📅 인식된 날짜: {base_date.strftime('%Y-%m-%d')}")
+            except:
+                st.error("⚠️ 날짜 형식이 잘못되었습니다.")
+                return
+
+        with row1_col2:
+            st.markdown("#### 🔢 계산 방식")
+            calc_method = st.selectbox(
+                "계산 방법 선택",
+                options=["월상", "월사", "일할"],
+                index=2, # 기본 '일할'
+                label_visibility="collapsed"
+            )
+            
+        with row2_col1:
+            st.markdown("#### ⚖️ 제도 선택")
+            benefit_system = st.radio(
+                "퇴직금 제도",
+                options=["단일제", "누진제"],
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+
+        with row2_col2:
+            st.markdown("#### 🤖 AI 설정")
+            openai_api_key = st.text_input(
+                "OpenAI API Key", 
+                type="password", 
+                placeholder="sk-...",
+                label_visibility="collapsed"
+            )
+
+        # --- 누진제 설정 표 (콤팩트한 레이아웃) ---
+        multiplier_table = None
+        if benefit_system == "누진제":
+            st.divider()
+            prog_col1, prog_col2 = st.columns([1.2, 1])
+            
+            with prog_col1:
+                st.markdown("#### 📈 누진제 배수 설정")
+                default_multipliers = pd.DataFrame([
+                    {"근속연수_이상": 0, "지급배수": 1.0},
+                    {"근속연수_이상": 5, "지급배수": 1.2},
+                    {"근속연수_이상": 10, "지급배수": 1.5},
+                ])
+                
+                multiplier_table = st.data_editor(
+                    default_multipliers,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={
+                        "근속연수_이상": st.column_config.NumberColumn("근속연수 이상", min_value=0, step=1, format="%d년"),
+                        "지급배수": st.column_config.NumberColumn("배수", min_value=1.0, step=0.1, format="%.2f배")
+                    },
+                    key="progressive_editor"
+                )
+
+            with prog_col2:
+                st.markdown("<br><br>", unsafe_allow_html=True)
+                st.info("""
+                **💡 입력 가이드**
+                - 구간별 시작 근속연수와 배수를 입력하세요.
+                - 표 하단의 빈 공간을 눌러 행을 추가할 수 있습니다.
+                - 행 왼쪽의 아이콘으로 삭제가 가능합니다.
+                """)
+
+        st.divider()
+
         processor = ExcelProcessor(uploaded_file)
         
         try:
@@ -56,8 +123,6 @@ def main():
                 st.warning("매칭된 시트가 없습니다. 시트 이름을 확인해 주세요 (예: '직원명부', '급여대장')")
                 return
 
-            st.success(f"총 {len(processed_data)}개의 시트가 처리되었습니다.")
-            
             # --- 1. 원본 데이터 섹션 (상단 이동) ---
             st.header("📋 원본 데이터 확인")
             sheet_names = list(processed_data.keys())
@@ -66,11 +131,51 @@ def main():
                 for tab, (sheet_name, data) in zip(sheet_tabs, processed_data.items()):
                     with tab:
                         st.subheader(f"'{sheet_name}' 시트 데이터")
-                        df = pd.DataFrame(data)
-                        st.dataframe(df, use_container_width=True)
+                        
+                        # 기초자료 요약 시트인 경우 특별하게 표시
+                        if "기초자료" in sheet_name and "퇴직급여" in sheet_name and len(data) > 0 and isinstance(data[0], dict) and data[0].get("구분") == "기초자료_요약":
+                            summary = data[0]
+                            
+                            col_info1, col_info2 = st.columns(2)
+                            with col_info1:
+                                st.markdown("#### 📋 기본 설정 정보")
+                                st.write(f"**• 정년퇴직연령:** {summary.get('정년퇴직연령', '-')}")
+                                st.write(f"**• 임금피크제 여부:** {summary.get('임금피크제', '-')}")
+                                st.write(f"**• 제도구분:** {summary.get('제도구분', '-')}")
+                                st.write(f"**• 급여체계:** {summary.get('연봉제_호봉제', '-')}")
+                                st.write(f"**• 할인율 산출기준:** {summary.get('할인율_산출기준', '-')}")
+                            
+                            with col_info2:
+                                st.markdown("#### 📈 임금상승률 (Base-up)")
+                                if summary.get('임금상승률'):
+                                    growth_df = pd.DataFrame(summary['임금상승률'])
+                                    # 인덱스 없이 깔끔하게 표시
+                                    st.dataframe(growth_df, use_container_width=True, hide_index=True)
+                                else:
+                                    st.write("데이터 없음")
+                            
+                            st.divider()
+                            st.markdown("#### 🔢 인원 및 추계액 요약")
+                            col_m1, col_m2, col_m3 = st.columns(3)
+                            
+                            # 숫자 포맷팅 (None 체크 포함)
+                            def fmt_num(val):
+                                try: return f"{int(val):,}"
+                                except: return "0"
+
+                            col_m1.metric("재직자수 합계", f"{fmt_num(summary.get('재직자수_합계'))}명")
+                            col_m2.metric("퇴직자수 합계", f"{fmt_num(summary.get('퇴직자수_합계'))}명")
+                            col_m3.metric("퇴직금 추계액 합계", f"{fmt_num(summary.get('퇴직금_추계액_합계'))}원")
+                            
+                        else:
+                            # 일반 명부 시트인 경우 기존처럼 표로 표시
+                            df = pd.DataFrame(data)
+                            st.dataframe(df, use_container_width=True)
                         
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("행 수", len(df))
+                        # 기초자료 요약인 경우 len(df) 대신 1이 나오므로 체크 필요
+                        display_len = len(data) if isinstance(data, list) else 0
+                        col1.metric("데이터 건수", display_len)
                         col2.metric("기준일", base_date.strftime('%Y-%m-%d'))
                         col3.metric("계산방법", calc_method)
             
@@ -149,7 +254,9 @@ def main():
                         df_active = pd.DataFrame(active_data)
                         
                         # 검증기 초기화 및 실행
-                        calc_validator = EstimateValidator(df_active, base_date, calc_method)
+                        # 누진제인 경우 multiplier_table을 전달
+                        prog_table = multiplier_table if benefit_system == "누진제" else None
+                        calc_validator = EstimateValidator(df_active, base_date, calc_method, progressive_multipliers=prog_table)
                         result_df = calc_validator.validate_calculation()
                         
                         # 사원번호를 정수형으로 변환 (사용자 요청사항)
@@ -233,7 +340,7 @@ def main():
             with tab_ai:
                 st.header("AI 심층 분석 (K-IFRS 1019)")
                 if not openai_api_key:
-                    st.info("AI 분석을 사용하려면 왼쪽 사이드바에 OpenAI API Key를 입력해 주세요.")
+                    st.info("AI 분석을 사용하려면 상단 설정에서 OpenAI API Key를 입력해 주세요.")
                 else:
                     if st.button("🧠 AI 종합 분석 시작", type="secondary", key="btn_ai"):
                         with st.spinner("AI가 정제 데이터와 규칙 검증 결과를 통합 분석 중입니다..."):
@@ -270,7 +377,7 @@ def main():
             st.error(f"오류 발생: {e}")
             st.exception(e) # 개발 중 상세 오류 확인용
     else:
-        st.info("왼쪽 사이드바에서 엑셀 파일을 업로드해 주세요.")
+        st.info("상단에서 엑셀 파일을 업로드해 주세요.")
 
 if __name__ == "__main__":
     main()
