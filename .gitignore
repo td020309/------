@@ -1,21 +1,11 @@
-# Excel files
-*.xlsx
-*.xls
-*.xlsm
-*.xlsb
-~$*.xlsx
-~$*.xls
-
-# Python
+.env
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
 ENV/
-
-# Streamlit
-.streamlit/config.toml
-
-
-
+.streamlit/
+*.xlsx
+*.xls
+!example.xlsx

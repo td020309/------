@@ -1,8 +1,13 @@
 import streamlit as st
 import pandas as pd
+import os
+from dotenv import load_dotenv
 from processor import ExcelProcessor
 from ai_analyzer import AIAnalyzer
 from exporter import ExcelExporter
+
+# .env 파일 로드
+load_dotenv()
 
 def main():
     st.set_page_config(page_title="엑셀 명부 검증 프로그램", layout="wide")
@@ -83,13 +88,13 @@ def main():
 
         with row2_col2:
             st.markdown("#### 🤖 AI 설정")
-            openai_api_key = st.text_input(
-                "OpenAI API Key", 
-                value="",
-                type="password", 
-                placeholder="sk-...",
-                label_visibility="collapsed"
-            )
+            # 환경 변수 또는 Streamlit Secrets에서 API 키 가져오기
+            openai_api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", "")
+            
+            if openai_api_key:
+                st.info("✅ AI 분석 준비 완료")
+            else:
+                st.warning("⚠️ API 키를 설정해주세요 (.env/Secrets)")
 
         # --- 누진제 설정 표 (콤팩트한 레이아웃) ---
         multiplier_table = None
@@ -108,7 +113,7 @@ def main():
                 multiplier_table = st.data_editor(
                     default_multipliers,
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "근속연수_이상": st.column_config.NumberColumn("근속연수 이상", min_value=0, step=1, format="%d년"),
                         "지급배수": st.column_config.NumberColumn("배수", min_value=1.0, step=0.1, format="%.2f배")
@@ -165,7 +170,7 @@ def main():
                                 if summary.get('임금상승률'):
                                     growth_df = pd.DataFrame(summary['임금상승률'])
                                     # 인덱스 없이 깔끔하게 표시
-                                    st.dataframe(growth_df, use_container_width=True, hide_index=True)
+                                    st.dataframe(growth_df, width="stretch", hide_index=True)
                                 else:
                                     st.write("데이터 없음")
                             
@@ -185,7 +190,7 @@ def main():
                         else:
                             # 일반 명부 시트인 경우 기존처럼 표로 표시
                             df = pd.DataFrame(data)
-                            st.dataframe(df, use_container_width=True)
+                            st.dataframe(df, width="stretch")
                         
                         col1, col2, col3 = st.columns(3)
                         # 기초자료 요약인 경우 len(df) 대신 1이 나오므로 체크 필요
@@ -204,7 +209,7 @@ def main():
             # 통합 검증 버튼을 상단에 배치
             col_btn1, col_btn2 = st.columns([1, 2])
             with col_btn1:
-                if st.button("🚀 통합 검증 시작 (규칙 + 추계액)", type="primary", use_container_width=True):
+                if st.button("🚀 통합 검증 시작 (규칙 + 추계액)", type="primary", width="stretch"):
                     with st.spinner("데이터 정합성 및 추계액 검증을 동시 진행 중..."):
                         # 1. 규칙 기반 검증
                         from validator import DataValidator
@@ -253,7 +258,7 @@ def main():
                     data=excel_data,
                     file_name=f"명부검증결과_{base_date.strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                     type="primary"
                 )
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -291,7 +296,7 @@ def main():
                                             # 데이터프레임 형태로 표시 (스크롤 가능하도록 height 설정)
                                             err_df = pd.DataFrame(items)
                                             err_df.columns = ["사원번호", "상세내용"]
-                                            st.dataframe(err_df, use_container_width=True, height=300, hide_index=True)
+                                            st.dataframe(err_df, width="stretch", height=300, hide_index=True)
                                 
                                 # 하단 여백 충분히 추가
                                 st.markdown("<br>" * 30, unsafe_allow_html=True)
@@ -341,7 +346,7 @@ def main():
                             display_df_mid['고객사액'] = df_mid_error['고객사_추계액'].map('{:,.0f}원'.format)
                             display_df_mid['오차율'] = df_mid_error['오차율'].map('{:.2f}%'.format)
                         
-                        st.dataframe(display_df_mid, use_container_width=True, height=250, hide_index=True)
+                        st.dataframe(display_df_mid, width="stretch", height=250, hide_index=True)
 
                         # 오차율 10% 이상 필터링
                         df_high_error = result_df[result_df['오차율'] >= 10].copy()
@@ -356,7 +361,7 @@ def main():
                             display_df['고객사액'] = df_high_error['고객사_추계액'].map('{:,.0f}원'.format)
                             display_df['오차율'] = df_high_error['오차율'].map('{:.2f}%'.format)
                         
-                        st.dataframe(display_df, use_container_width=True, height=250, hide_index=True)
+                        st.dataframe(display_df, width="stretch", height=250, hide_index=True)
 
                         # --- 오차율 TOP 5 추가 ---
                         st.markdown("#### 🏆 오차율 TOP 5 (가장 높은 5명)")
@@ -369,13 +374,13 @@ def main():
                             display_df_top5['고객사액'] = df_top5['고객사_추계액'].map('{:,.0f}원'.format)
                             display_df_top5['오차율'] = df_top5['오차율'].map('{:.2f}%'.format)
                         
-                        st.dataframe(display_df_top5, use_container_width=True, hide_index=True)
+                        st.dataframe(display_df_top5, width="stretch", hide_index=True)
 
                         # 전체 결과 데이터프레임 (접기 가능)
                         with st.expander("전체 검증 데이터 상세 보기"):
                             # 가독성을 위해 컬럼 순서 조정
                             final_cols = ['사원번호', '시스템_추계액', '고객사_추계액', '오차율', '시스템_근속연수', '기준급여', '적용배수', '휴직차감']
-                            st.dataframe(result_df[final_cols], use_container_width=True, hide_index=True)
+                            st.dataframe(result_df[final_cols], width="stretch", hide_index=True)
                         
                         st.success("시뮬레이션이 완료되었습니다. 제공해주실 알고리즘에 따라 '시스템_추계액'이 계산될 예정입니다.")
 
@@ -386,7 +391,7 @@ def main():
             with tab_ai:
                 st.header("AI 심층 분석 (K-IFRS 1019)")
                 if not openai_api_key:
-                    st.info("AI 분석을 사용하려면 상단 설정에서 OpenAI API Key를 입력해 주세요.")
+                    st.error("AI 분석 기능을 사용할 수 없습니다. 환경 변수나 Streamlit Secrets에 'OPENAI_API_KEY'가 설정되어 있는지 확인해 주세요.")
                 else:
                     if st.button("🧠 AI 종합 분석 시작", type="secondary", key="btn_ai"):
                         with st.spinner("AI가 정제 데이터와 규칙 검증 결과를 통합 분석 중입니다..."):
