@@ -6,4 +6,5 @@ tabulate
 numpy
 pyarrow
 python-dateutil
+xlsxwriter
 

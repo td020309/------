@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from processor import ExcelProcessor
 from ai_analyzer import AIAnalyzer
+from exporter import ExcelExporter
 
 def main():
     st.set_page_config(page_title="엑셀 명부 검증 프로그램", layout="wide")
@@ -27,6 +28,18 @@ def main():
     st.header("📥 입력 정보 및 설정")
     uploaded_file = st.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"])
     
+    # 새로운 파일이 업로드되면 세션 상태 초기화
+    if uploaded_file is not None:
+        if 'last_uploaded_file' not in st.session_state or st.session_state['last_uploaded_file'] != uploaded_file.name:
+            st.session_state['last_uploaded_file'] = uploaded_file.name
+            st.session_state['validation_done'] = False
+            st.session_state['calc_done'] = False
+            st.session_state['ai_analysis_done'] = False
+            if 'validation_results' in st.session_state: del st.session_state['validation_results']
+            if 'calc_results_df' in st.session_state: del st.session_state['calc_results_df']
+            if 'ai_analysis_result' in st.session_state: del st.session_state['ai_analysis_result']
+            if 'calc_summary' in st.session_state: del st.session_state['calc_summary']
+
     if uploaded_file is not None:
         # 레이아웃 개선: 2행 2열 구조로 변경
         row1_col1, row1_col2 = st.columns(2)
@@ -185,6 +198,65 @@ def main():
             st.markdown("<br>", unsafe_allow_html=True)
 
             # --- 2. 검증 및 분석 섹션 (하단) ---
+            st.header("🔍 검증 및 분석")
+            
+            # 통합 검증 버튼을 상단에 배치
+            col_btn1, col_btn2 = st.columns([1, 2])
+            with col_btn1:
+                if st.button("🚀 통합 검증 시작 (규칙 + 추계액)", type="primary", use_container_width=True):
+                    with st.spinner("데이터 정합성 및 추계액 검증을 동시 진행 중..."):
+                        # 1. 규칙 기반 검증
+                        from validator import DataValidator
+                        validator = DataValidator(processed_data, base_date, calc_method)
+                        st.session_state['validation_results'] = validator.validate()
+                        st.session_state['validation_done'] = True
+                        
+                        # 2. 추계액 검증
+                        active_sheets = [name for name in processed_data.keys() if "재직자" in name and "기타장기" not in name]
+                        if active_sheets:
+                            from validatorcalculate import EstimateValidator
+                            selected_active_sheet = active_sheets[0]
+                            active_data = processed_data[selected_active_sheet]
+                            df_active = pd.DataFrame(active_data)
+                            
+                            prog_table = multiplier_table if benefit_system == "누진제" else None
+                            calc_validator = EstimateValidator(df_active, base_date, calc_method, progressive_multipliers=prog_table)
+                            result_df = calc_validator.validate_calculation()
+                            
+                            if '사원번호' in result_df.columns:
+                                result_df['사원번호'] = pd.to_numeric(result_df['사원번호'], errors='coerce').fillna(0).astype(int)
+                            
+                            st.session_state['calc_results_df'] = result_df
+                            st.session_state['calc_done'] = True
+                            st.session_state['calc_summary'] = calc_validator.get_summary(result_df)
+            
+            # --- 결과 추출 (엑셀) 섹션 ---
+            has_results = any([
+                st.session_state.get('validation_done', False),
+                st.session_state.get('calc_done', False),
+                st.session_state.get('ai_analysis_done', False)
+            ])
+            
+            if has_results:
+                exporter = ExcelExporter()
+                excel_data = exporter.export(
+                    processed_data=processed_data, # 원본 데이터 추가
+                    validation_results=st.session_state.get('validation_results'),
+                    calc_results_df=st.session_state.get('calc_results_df'),
+                    ai_result=st.session_state.get('ai_analysis_result'),
+                    base_date=base_date.strftime('%Y-%m-%d')
+                )
+                
+                st.download_button(
+                    label="📥 검증 결과 엑셀 다운로드 (보고용)",
+                    data=excel_data,
+                    file_name=f"명부검증결과_{base_date.strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
+                st.markdown("<br>", unsafe_allow_html=True)
+
             tab_rule, tab_calc, tab_ai = st.tabs([
                 "🔍 규칙 기반 검증", 
                 "🧮 추계액 검증", 
@@ -194,12 +266,6 @@ def main():
             # --- 2-1. 규칙 기반 검증 탭 ---
             with tab_rule:
                 st.header("데이터 검증 (Hard Rules)")
-                if st.button("🚀 규칙 기반 검증 시작", type="primary", key="btn_rule"):
-                    from validator import DataValidator
-                    validator = DataValidator(processed_data, base_date, calc_method)
-                    v_results = validator.validate()
-                    st.session_state['validation_results'] = v_results
-                    st.session_state['validation_done'] = True
                 
                 if st.session_state.get('validation_done', False):
                     v_results = st.session_state.get('validation_results', {})
@@ -245,26 +311,11 @@ def main():
                 if not active_sheets:
                     st.info("추계액 검증을 위한 '재직자명부' 시트가 없습니다.")
                 else:
-                    # 첫 번째 재직자 명부를 자동으로 선택
                     selected_active_sheet = active_sheets[0]
                     
-                    if st.button("📊 추계액 시뮬레이션 실행", type="primary"):
-                        from validatorcalculate import EstimateValidator
-                        
-                        active_data = processed_data[selected_active_sheet]
-                        df_active = pd.DataFrame(active_data)
-                        
-                        # 검증기 초기화 및 실행
-                        # 누진제인 경우 multiplier_table을 전달
-                        prog_table = multiplier_table if benefit_system == "누진제" else None
-                        calc_validator = EstimateValidator(df_active, base_date, calc_method, progressive_multipliers=prog_table)
-                        result_df = calc_validator.validate_calculation()
-                        
-                        # 사원번호를 정수형으로 변환 (사용자 요청사항)
-                        if '사원번호' in result_df.columns:
-                            result_df['사원번호'] = pd.to_numeric(result_df['사원번호'], errors='coerce').fillna(0).astype(int)
-                        
-                        summary = calc_validator.get_summary(result_df)
+                    if st.session_state.get('calc_done', False):
+                        result_df = st.session_state['calc_results_df']
+                        summary = st.session_state['calc_summary']
                         
                         # 결과 요약 표시
                         st.subheader(f"'{selected_active_sheet}' 계산 검토 결과")
@@ -277,11 +328,6 @@ def main():
                         # 오차율별 상세 내역 표시 (이미지 요청사항 반영)
                         st.divider()
                         
-                        # 데이터 준비
-                        col_original = calc_validator._find_column('당년도')
-                        col_salary = calc_validator._find_column('기준급여')
-                        col_emp_id = calc_validator._find_column('사원번호')
-
                         # 오차율 5% ~ 10% 미만
                         df_mid_error = result_df[(result_df['오차율'] >= 5) & (result_df['오차율'] < 10)].copy()
                         
@@ -309,7 +355,6 @@ def main():
                             display_df['고객사액'] = df_high_error['고객사_추계액'].map('{:,.0f}원'.format)
                             display_df['오차율'] = df_high_error['오차율'].map('{:.2f}%'.format)
                         
-                        # 데이터가 없어도 칸은 보여줌
                         st.dataframe(display_df, use_container_width=True, height=250, hide_index=True)
 
                         # --- 오차율 TOP 5 추가 ---
@@ -324,7 +369,6 @@ def main():
                             display_df_top5['오차율'] = df_top5['오차율'].map('{:.2f}%'.format)
                         
                         st.dataframe(display_df_top5, use_container_width=True, hide_index=True)
-                        # -----------------------
 
                         # 전체 결과 데이터프레임 (접기 가능)
                         with st.expander("전체 검증 데이터 상세 보기"):
