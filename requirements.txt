@@ -8,5 +8,5 @@ pyarrow
 python-dateutil
 xlsxwriter
 python-dotenv
-altair
+altair<5
 
