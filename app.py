@@ -236,33 +236,6 @@ def main():
                             st.session_state['calc_done'] = True
                             st.session_state['calc_summary'] = calc_validator.get_summary(result_df)
             
-            # --- 결과 추출 (엑셀) 섹션 ---
-            has_results = any([
-                st.session_state.get('validation_done', False),
-                st.session_state.get('calc_done', False),
-                st.session_state.get('ai_analysis_done', False)
-            ])
-            
-            if has_results:
-                exporter = ExcelExporter()
-                excel_data = exporter.export(
-                    processed_data=processed_data, # 원본 데이터 추가
-                    validation_results=st.session_state.get('validation_results'),
-                    calc_results_df=st.session_state.get('calc_results_df'),
-                    ai_result=st.session_state.get('ai_analysis_result'),
-                    base_date=base_date.strftime('%Y-%m-%d')
-                )
-                
-                st.download_button(
-                    label="📥 검증 결과 엑셀 다운로드 (보고용)",
-                    data=excel_data,
-                    file_name=f"명부검증결과_{base_date.strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    width="stretch",
-                    type="primary"
-                )
-                st.markdown("<br>", unsafe_allow_html=True)
-
             tab_rule, tab_calc, tab_ai = st.tabs([
                 "🔍 규칙 기반 검증", 
                 "🧮 추계액 검증", 
@@ -423,6 +396,35 @@ def main():
                 
                 # 하단 여백 충분히 추가
                 st.markdown("<br>" * 30, unsafe_allow_html=True)
+
+            # --- 결과 추출 (엑셀) 섹션 ---
+            has_results = any([
+                st.session_state.get('validation_done', False),
+                st.session_state.get('calc_done', False),
+                st.session_state.get('ai_analysis_done', False)
+            ])
+            
+            if has_results:
+                st.divider()
+                st.subheader("📥 최종 결과 다운로드")
+                exporter = ExcelExporter()
+                excel_data = exporter.export(
+                    processed_data=processed_data, # 원본 데이터 추가
+                    validation_results=st.session_state.get('validation_results'),
+                    calc_results_df=st.session_state.get('calc_results_df'),
+                    ai_result=st.session_state.get('ai_analysis_result'),
+                    base_date=base_date.strftime('%Y-%m-%d')
+                )
+                
+                st.download_button(
+                    label="📥 검증 결과 엑셀 다운로드 (보고용)",
+                    data=excel_data,
+                    file_name=f"명부검증결과_{base_date.strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    width="stretch",
+                    type="primary"
+                )
+                st.markdown("<br>", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"오류 발생: {e}")
