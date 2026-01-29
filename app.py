@@ -85,6 +85,7 @@ def main():
             st.markdown("#### 🤖 AI 설정")
             openai_api_key = st.text_input(
                 "OpenAI API Key", 
+                value="",
                 type="password", 
                 placeholder="sk-...",
                 label_visibility="collapsed"
