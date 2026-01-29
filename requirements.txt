@@ -8,4 +8,5 @@ pyarrow
 python-dateutil
 xlsxwriter
 python-dotenv
+altair
 
